@@ -171,6 +171,7 @@ bool IsPlainInstr(TokenType token_type) {
     case TokenType::AtomicStore:
     case TokenType::AtomicRmw:
     case TokenType::AtomicRmwCmpxchg:
+    case TokenType::SimdConst:
       return true;
     default:
       return false;
@@ -578,7 +579,7 @@ bool WastParser::ParseVarListOpt(VarVector* out_var_list) {
 Result WastParser::ParseValueType(Type* out_type) {
   WABT_TRACE(ParseValueType);
   if (!PeekMatch(TokenType::ValueType))
-    return ErrorExpected({"i32", "i64", "f32", "f64"});
+    return ErrorExpected({"i32", "i64", "f32", "f64", "v128"});
 
   *out_type = Consume().type();
   return Result::Ok;
@@ -1477,12 +1478,107 @@ Result WastParser::ParsePlainInstr(std::unique_ptr<Expr>* out_expr) {
       break;
     }
 
+    // Simd
+    case TokenType::SimdConst: {
+      Const const_;
+      CHECK_RESULT(ParseSimdConst(&const_));
+      out_expr->reset(new ConstExpr(const_, loc));
+      break;
+    }
+
     default:
       assert(
           !"ParsePlainInstr should only be called when IsPlainInstr() is true");
       return Result::Error;
   }
 
+  return Result::Ok;
+}
+
+// Simd
+// The expected V128 const lists is:
+// i32 0xXXXXXXXX 0xXXXXXXXX 0xXXXXXXXX 0xXXXXXXXX
+Result WastParser::ParseSimdConstList(ConstVector* consts) {
+  WABT_TRACE(ParseSimdConstList);
+  Literal literal;
+
+  // Check input const type.
+  if (!PeekMatch(TokenType::ValueType))
+    return Result::Error;
+
+  Type in_type = Consume().type();
+
+  switch (in_type) {
+    case Type::I32: {
+      // Meet expected "i32" token. start parse 4 i32 consts
+      for(int i=0; i<4; i++) {
+      Const const_;
+      const_.loc = GetLocation();
+
+      // Expected one 0xXXXXXXXX number
+      if (!PeekMatch(TokenType::Nat))
+        return ErrorExpected({"an Nat literal"}, "123");
+
+      Literal literal = Consume().literal();
+
+      string_view sv = literal.text;
+      const char* s = sv.begin();
+      const char* end = sv.end();
+      Result result;
+
+      const_.type = Type::I32;
+      result =
+          ParseInt32(s, end, &(const_.u32), ParseIntType::SignedAndUnsigned);
+
+      if (Failed(result)) {
+        Error(const_.loc, "invalid literal \"%s\"", literal.text.c_str());
+      }
+
+      consts->push_back(const_);
+      }
+      break;
+    }
+    default:
+      assert(!"ParseSimdConstListcalled with invalid input const type");
+      return Result::Error;
+  }
+
+  return Result::Ok;
+}
+
+Result WastParser::ParseSimdConst(Const* const_) {
+  WABT_TRACE(ParseSimdConst);
+  Opcode opcode = Consume().opcode();
+
+  const_->loc = GetLocation();
+
+  ConstVector simdconsts;
+  CHECK_RESULT(ParseSimdConstList(&simdconsts));
+
+  switch (opcode) {
+    case Opcode::V128Const: {
+      const_->type = Type::V128;
+      // 1. check the const type and range.
+      int nSize = simdconsts.size();
+      assert(nSize == 4);
+      // 2. Copy it into const_.v128_bits.
+      union i128bits{
+        int32_t i32Array[4];
+        uint8_t i8Array[16];
+      } i128;
+
+      for(int i = 0; i < nSize; i++) {
+        i128.i32Array[i] = simdconsts[i].u32;
+      }
+
+      memcpy(&const_->v128_bits, &(i128.i8Array[0]), sizeof(v128));
+      break;
+    } 
+    default:
+      assert(!"ParseSimdConst called with invalid opcode");
+      return Result::Error;
+  }
+  
   return Result::Ok;
 }
 
@@ -1499,7 +1595,6 @@ Result WastParser::ParseConst(Const* const_) {
     case TokenType::Float:
       literal = Consume().literal();
       break;
-
     default:
       return ErrorExpected({"a numeric literal"}, "123, -45, 6.7e8");
   }

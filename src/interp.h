@@ -133,6 +133,7 @@ template <> struct ValueTypeRepT<uint64_t> { typedef uint64_t type; };
 template <> struct ValueTypeRepT<float> { typedef uint32_t type; };
 template <> struct ValueTypeRepT<double> { typedef uint64_t type; };
 
+
 template <typename T>
 using ValueTypeRep = typename ValueTypeRepT<T>::type;
 

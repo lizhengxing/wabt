@@ -105,6 +105,7 @@ const char* GetTokenTypeName(TokenType token_type) {
       "unreachable",
       "WAIT",
       "WAKE",
+      "SIMDCONST",
 
       // String.
       "align=",

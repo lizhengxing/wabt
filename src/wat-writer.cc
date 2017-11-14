@@ -452,6 +452,19 @@ void WatWriter::WriteConst(const Const& const_) {
       break;
     }
 
+    // Simd
+    case Type::V128: {
+      int32_t i32Array[4];
+      memcpy(&i32Array, &(const_.v128_bits), sizeof(v128));
+      WritePutsSpace(Opcode::V128Const_Opcode.GetName());
+      Writef("i32 0x%08x", i32Array[0]);
+      Writef(" 0x%08x", i32Array[1]);
+      Writef(" 0x%08x", i32Array[2]);
+      Writef(" 0x%08x", i32Array[3]);
+      WriteNewline(NO_FORCE_NEWLINE);
+      break;
+    }
+
     default:
       assert(0);
       break;

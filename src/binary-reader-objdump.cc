@@ -541,6 +541,8 @@ class BinaryReaderObjdump : public BinaryReaderObjdumpBase {
 
   Result OnInitExprF32ConstExpr(Index index, uint32_t value) override;
   Result OnInitExprF64ConstExpr(Index index, uint64_t value) override;
+  // Simd
+  Result OnInitExprV128ConstExpr(Index index, v128 value) override;
   Result OnInitExprGetGlobalExpr(Index index, Index global_index) override;
   Result OnInitExprI32ConstExpr(Index index, uint32_t value) override;
   Result OnInitExprI64ConstExpr(Index index, uint64_t value) override;
@@ -938,6 +940,13 @@ Result BinaryReaderObjdump::OnInitExprF64ConstExpr(Index index,
   } else {
     PrintInitExpr(expr);
   }
+  return Result::Ok;
+}
+
+// Simd
+Result BinaryReaderObjdump::OnInitExprV128ConstExpr(Index index,
+                                                    v128 value) {
+  /*TODO (zhengxing)*/
   return Result::Ok;
 }
 

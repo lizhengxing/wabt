@@ -122,8 +122,9 @@ enum class TokenType {
   Unreachable,
   Wait,
   Wake,
+  SimdConst,
   First_Opcode = AtomicLoad,
-  Last_Opcode = Wake,
+  Last_Opcode = SimdConst,
 
   // Tokens with string data.
   AlignEqNat,

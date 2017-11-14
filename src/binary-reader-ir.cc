@@ -146,6 +146,8 @@ class BinaryReaderIR : public BinaryReaderNop {
   Result OnEndExpr() override;
   Result OnF32ConstExpr(uint32_t value_bits) override;
   Result OnF64ConstExpr(uint64_t value_bits) override;
+  // Simd
+  Result OnV128ConstExpr(v128 value_bits) override;
   Result OnGetGlobalExpr(Index global_index) override;
   Result OnGetLocalExpr(Index local_index) override;
   Result OnGrowMemoryExpr() override;
@@ -209,6 +211,8 @@ class BinaryReaderIR : public BinaryReaderNop {
 
   Result OnInitExprF32ConstExpr(Index index, uint32_t value) override;
   Result OnInitExprF64ConstExpr(Index index, uint64_t value) override;
+  // Simd
+  Result OnInitExprV128ConstExpr(Index index, v128 value) override;
   Result OnInitExprGetGlobalExpr(Index index, Index global_index) override;
   Result OnInitExprI32ConstExpr(Index index, uint32_t value) override;
   Result OnInitExprI64ConstExpr(Index index, uint64_t value) override;
@@ -648,6 +652,12 @@ Result BinaryReaderIR::OnF64ConstExpr(uint64_t value_bits) {
       MakeUnique<ConstExpr>(Const::F64(value_bits, GetLocation())));
 }
 
+// Simd
+Result BinaryReaderIR::OnV128ConstExpr(v128 value_bits) {
+  return AppendExpr(
+      MakeUnique<ConstExpr>(Const::V128(value_bits, GetLocation())));
+}
+
 Result BinaryReaderIR::OnGetGlobalExpr(Index global_index) {
   return AppendExpr(
       MakeUnique<GetGlobalExpr>(Var(global_index, GetLocation())));
@@ -921,6 +931,14 @@ Result BinaryReaderIR::OnInitExprF64ConstExpr(Index index, uint64_t value) {
   Location loc = GetLocation();
   current_init_expr_->push_back(
       MakeUnique<ConstExpr>(Const::F64(value, loc), loc));
+  return Result::Ok;
+}
+
+// Simd
+Result BinaryReaderIR::OnInitExprV128ConstExpr(Index index, v128 value) {
+  Location loc = GetLocation();
+  current_init_expr_->push_back(
+      MakeUnique<ConstExpr>(Const::V128(value, loc), loc));
   return Result::Ok;
 }
 

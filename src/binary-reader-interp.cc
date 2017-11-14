@@ -165,6 +165,8 @@ class BinaryReaderInterp : public BinaryReaderNop {
   wabt::Result OnEndExpr() override;
   wabt::Result OnF32ConstExpr(uint32_t value_bits) override;
   wabt::Result OnF64ConstExpr(uint64_t value_bits) override;
+  // Simd
+  wabt::Result OnV128ConstExpr(v128 value_bits) override;
   wabt::Result OnGetGlobalExpr(Index global_index) override;
   wabt::Result OnGetLocalExpr(Index local_index) override;
   wabt::Result OnGrowMemoryExpr() override;
@@ -204,6 +206,8 @@ class BinaryReaderInterp : public BinaryReaderNop {
 
   wabt::Result OnInitExprF32ConstExpr(Index index, uint32_t value) override;
   wabt::Result OnInitExprF64ConstExpr(Index index, uint64_t value) override;
+  // Simd
+  wabt::Result OnInitExprV128ConstExpr(Index index, v128 value) override;
   wabt::Result OnInitExprGetGlobalExpr(Index index,
                                        Index global_index) override;
   wabt::Result OnInitExprI32ConstExpr(Index index, uint32_t value) override;
@@ -901,6 +905,13 @@ wabt::Result BinaryReaderInterp::OnInitExprF64ConstExpr(Index index,
   return wabt::Result::Ok;
 }
 
+// Simd
+wabt::Result BinaryReaderInterp::OnInitExprV128ConstExpr(Index index,
+                                                         v128 value_bits) {
+  /*TODO (zhengxing)*/
+  return wabt::Result::Ok;
+}
+
 wabt::Result BinaryReaderInterp::OnInitExprGetGlobalExpr(Index index,
                                                          Index global_index) {
   if (global_index >= num_global_imports_) {
@@ -1359,6 +1370,12 @@ wabt::Result BinaryReaderInterp::OnF64ConstExpr(uint64_t value_bits) {
   CHECK_RESULT(typechecker_.OnConst(Type::F64));
   CHECK_RESULT(EmitOpcode(Opcode::F64Const));
   CHECK_RESULT(EmitI64(value_bits));
+  return wabt::Result::Ok;
+}
+
+// Simd
+wabt::Result BinaryReaderInterp::OnV128ConstExpr(v128 value_bits) {
+  /*TODO (zhengxing)*/
   return wabt::Result::Ok;
 }
 

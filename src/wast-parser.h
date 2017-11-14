@@ -200,6 +200,10 @@ class WastParser {
   template <typename T>
   Result ParseAssertScriptModuleCommand(TokenType, CommandPtr*);
 
+  // Simd
+  Result ParseSimdConst(Const*);
+  Result ParseSimdConstList(ConstVector*);
+
   void CheckImportOrdering(Module*);
 
   WastLexer* lexer_;

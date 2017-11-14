@@ -429,6 +429,11 @@ void BinaryWriter::WriteExpr(const Module* module,
           WriteOpcode(stream_, Opcode::F64Const);
           stream_->WriteU64(const_.f64_bits, "f64 literal");
           break;
+        // Simd
+        case Type::V128:
+          WriteOpcode(stream_, Opcode::V128Const);
+          stream_->WriteU128(const_.v128_bits, "v128 literal");
+          break;
         default:
           assert(0);
       }
