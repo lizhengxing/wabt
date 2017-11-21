@@ -44,10 +44,15 @@ enum class NextChar {
 };
 
 struct Label {
-  Label(const Block& block, size_t type_stack_size)
-      : block(block), type_stack_size(type_stack_size) {}
-  const Block& block;
+  Label(const std::string& name,
+        const BlockSignature& sig,
+        size_t type_stack_size,
+        bool used = false)
+      : name(name), sig(sig), type_stack_size(type_stack_size), used(used) {}
+  const std::string& name;
+  const BlockSignature& sig;
   size_t type_stack_size;
+  bool used = false;
 };
 
 template <bool is_global>
@@ -58,6 +63,16 @@ struct Name {
 
 typedef Name<false> LocalName;
 typedef Name<true> GlobalName;
+
+struct GotoLabel {
+  explicit GotoLabel(const Var& var) : var(var) {}
+  const Var& var;
+};
+
+struct LabelDecl {
+  explicit LabelDecl(const std::string& name) : name(name) {}
+  std::string name;
+};
 
 struct GlobalVar {
   explicit GlobalVar(const Var& var) : var(var) {}
@@ -127,8 +142,11 @@ class CWriter {
   void PushTypes(const TypeVector&);
   void DropTypes(size_t count);
 
-  void PushLabel(const Block& block);
+  void PushLabel(const std::string& name,
+                 const BlockSignature&,
+                 bool used = false);
   const Label* FindLabel(const Var& var);
+  bool IsTopLabelUsed() const;
   void PopLabel();
 
   std::string MangleName(string_view);
@@ -166,6 +184,8 @@ class CWriter {
   void Write(SignedType);
   void Write(TypeEnum);
   void Write(const Var&);
+  void Write(const GotoLabel&);
+  void Write(const LabelDecl&);
   void Write(const GlobalVar&);
   void Write(const StackVar&);
   void Write(const CopyLabelVar&);
@@ -195,7 +215,6 @@ class CWriter {
   void WriteParams();
   void WriteLocals();
   void WriteStackVarDeclarations();
-  void Write(const Block&);
   void Write(const ExprList&);
 
   enum class AssignOp {
@@ -234,6 +253,8 @@ class CWriter {
   TypeVector type_stack_;
   std::vector<Label> label_stack_;
 };
+
+static const char kImplicitFuncLabel[] = "$Bfunc";
 
 static const char* s_global_symbols[] = {
   // keywords
@@ -378,6 +399,13 @@ void init(void);
 
 #define TRAP(x) (trap(TRAP_##x), 0)
 
+#define UNREACHABLE TRAP(UNREACHABLE)
+
+#define CALL_INDIRECT(table, t, ft, x, ...)                                 \
+  (((x) < table.len && table.data[x].func && table.data[x].func_type == ft) \
+       ? ((t)table.data[x].func)(__VA_ARGS__)                               \
+       : TRAP(CALL_INDIRECT))
+
 #define MEMCHECK(mem, a, t)  \
   if (UNLIKELY((a) + sizeof(t) > mem.len)) TRAP(OOB)
 
@@ -396,26 +424,48 @@ void init(void);
     memcpy(&mem.data[addr], &wrapped, sizeof(t1)); \
   }
 
-#define CALL_INDIRECT(table, t, ft, x, ...)                                 \
-  (((x) < table.len && table.data[x].func && table.data[x].func_type == ft) \
-       ? ((t)table.data[x].func)(__VA_ARGS__)                               \
-       : TRAP(CALL_INDIRECT))
+#define I32_CLZ(x) ((x) ? __builtin_clz(x) : 32)
+#define I64_CLZ(x) ((x) ? __builtin_clzll(x) : 64)
+#define I32_CTZ(x) ((x) ? __builtin_ctz(x) : 32)
+#define I64_CTZ(x) ((x) ? __builtin_ctzll(x) : 64)
+#define I32_POPCNT(x) (__builtin_popcount(x))
+#define I64_POPCNT(x) (__builtin_popcountll(x))
 
 #define DIVREM_S(op, ut, st, min, x, y)                      \
    ((UNLIKELY((y) == 0)) ?                TRAP(DIV_BY_ZERO)  \
   : (UNLIKELY((x) == min && (y) == -1)) ? TRAP(INT_OVERFLOW) \
   : (ut)((x) op (y)))
 
-#define DIVREM_U(op, x, y) \
-  ((UNLIKELY((y) == 0)) ? TRAP(DIV_BY_ZERO) : ((x) op (y)))
-
 #define I32_DIV_S(x, y) DIVREM_S(/, u32, s32, INT32_MIN, (s32)x, (s32)y)
 #define I64_DIV_S(x, y) DIVREM_S(/, u64, s64, INT64_MIN, (s64)x, (s64)y)
 #define I32_REM_S(x, y) DIVREM_S(%, u32, s32, INT32_MIN, (s32)x, (s32)y)
 #define I64_REM_S(x, y) DIVREM_S(%, u64, s64, INT64_MIN, (s64)x, (s64)y)
 
+#define DIVREM_U(op, x, y) \
+  ((UNLIKELY((y) == 0)) ? TRAP(DIV_BY_ZERO) : ((x) op (y)))
+
 #define DIV_U(x, y) DIVREM_U(/, x, y)
 #define REM_U(x, y) DIVREM_U(%, x, y)
+
+#define ROTL(x, y, mask) \
+  (((x) << ((y) & (mask))) | ((x) >> (((mask) - (y) + 1) & (mask))))
+#define ROTR(x, y, mask) \
+  (((x) >> ((y) & (mask))) | ((x) << (((mask) - (y) + 1) & (mask))))
+
+#define I32_ROTL(x, y) ROTL(x, y, 31)
+#define I64_ROTL(x, y) ROTL(x, y, 63)
+#define I32_ROTR(x, y) ROTR(x, y, 31)
+#define I64_ROTR(x, y) ROTR(x, y, 63)
+
+#define FMIN(x, y)             \
+   ((UNLIKELY((x) != (x))) ? x \
+  : (UNLIKELY((y) != (y))) ? y \
+  : (x < y) ? x : y)
+
+#define FMAX(x, y)             \
+   ((UNLIKELY((x) != (x))) ? x \
+  : (UNLIKELY((y) != (y))) ? y \
+  : (x > y) ? x : y)
 
 #define TRUNC_S(ut, ft, min, max, maxop, x)                                 \
    ((UNLIKELY((x) != (x))) ? TRAP(INVALID_CONVERSION)                       \
@@ -449,15 +499,6 @@ DEFINE_REINTERPRET(i32_reinterpret_f32, f32, u32)
 DEFINE_REINTERPRET(f64_reinterpret_i64, u64, f64)
 DEFINE_REINTERPRET(i64_reinterpret_f64, f64, u64)
 
-#define I32_CLZ(x) ((x) ? __builtin_clz(x) : 32)
-#define I64_CLZ(x) ((x) ? __builtin_clzll(x) : 64)
-#define I32_CTZ(x) ((x) ? __builtin_ctz(x) : 32)
-#define I64_CTZ(x) ((x) ? __builtin_ctzll(x) : 64)
-#define I32_POPCNT(x) (__builtin_popcount(x))
-#define I64_POPCNT(x) (__builtin_popcountll(x))
-
-#define UNREACHABLE TRAP(UNREACHABLE)
-
 )";
 
 size_t CWriter::MarkTypeStack() const {
@@ -487,19 +528,38 @@ void CWriter::DropTypes(size_t count) {
   type_stack_.erase(type_stack_.end() - count, type_stack_.end());
 }
 
-void CWriter::PushLabel(const Block& block) {
-  label_stack_.emplace_back(block, type_stack_.size());
+void CWriter::PushLabel(const std::string& name,
+                        const BlockSignature& sig,
+                        bool used) {
+  label_stack_.emplace_back(name, sig, type_stack_.size(), used);
 }
 
 const Label* CWriter::FindLabel(const Var& var) {
-  assert(var.is_name());
-  for (Index i = label_stack_.size(); i > 0; --i) {
-    const Label& label = label_stack_[i - 1];
-    if (label.block.label == var.name())
-      return &label;
+  Label* label = nullptr;
+
+  if (var.is_index()) {
+    // We've generated names for all labels, so we should only be using an
+    // index when branching to the implicit function label, which can't be
+    // named.
+    assert(var.index() + 1 == label_stack_.size());
+    label = &label_stack_[0];
+  } else {
+    assert(var.is_name());
+    for (Index i = label_stack_.size(); i > 0; --i) {
+      label = &label_stack_[i - 1];
+      if (label->name == var.name())
+        break;
+    }
   }
-  assert(0);
-  return nullptr;
+
+  assert(label);
+  label->used = true;
+  return label;
+}
+
+bool CWriter::IsTopLabelUsed() const {
+  assert(!label_stack_.empty());
+  return label_stack_.back().used;
 }
 
 void CWriter::PopLabel() {
@@ -682,6 +742,22 @@ void CWriter::Write(const Var& var) {
   Write(LocalName(var.name()));
 }
 
+void CWriter::Write(const GotoLabel& var) {
+  if (var.var.is_name()) {
+    Write("goto ", var.var, ";");
+  } else {
+    // We've generated names for all labels, so we should only be using an
+    // index when branching to the implicit function label, which can't be
+    // named.
+    Write("goto ", Var(kImplicitFuncLabel), ";");
+  }
+}
+
+void CWriter::Write(const LabelDecl& label) {
+  if (IsTopLabelUsed())
+    Write(label.name, ":;", Newline());
+}
+
 void CWriter::Write(const GlobalVar& var) {
   assert(var.var.is_name());
   Write(GlobalName(var.var.name()));
@@ -714,10 +790,10 @@ void CWriter::Write(const StackVar& sv) {
 }
 
 void CWriter::Write(const CopyLabelVar& clv) {
-  assert(clv.label.block.sig.size() == 1);
+  assert(clv.label.sig.size() == 1);
   assert(type_stack_.size() >= clv.label.type_stack_size);
   Write(StackVar(type_stack_.size() - clv.label.type_stack_size - 1,
-                 clv.label.block.sig[0]),
+                 clv.label.sig[0]),
         " = ", StackVar(0), ";");
 }
 
@@ -915,19 +991,18 @@ void CWriter::WriteFuncDeclaration(const FuncDeclaration& decl,
 }
 
 void CWriter::WriteGlobals() {
-  if (module_->globals.size() == module_->num_global_imports)
-    return;
-
   Index global_index = 0;
-  for (const Global* global : module_->globals) {
-    bool is_import = global_index < module_->num_global_imports;
-    if (!is_import) {
-      Write("static ");
-      WriteGlobal(*global, DefineGlobalName(global->name));
+  if (module_->globals.size() != module_->num_global_imports) {
+    for (const Global* global : module_->globals) {
+      bool is_import = global_index < module_->num_global_imports;
+      if (!is_import) {
+        Write("static ");
+        WriteGlobal(*global, DefineGlobalName(global->name));
+      }
+      ++global_index;
     }
-    ++global_index;
+    Write(Newline(true), Newline(true));
   }
-  Write(Newline(true), Newline(true));
 
   Write("static void init_globals(void) ", OpenBrace());
   global_index = 0;
@@ -1020,24 +1095,25 @@ void CWriter::WriteTable(const Table& table, const std::string& name) {
 }
 
 void CWriter::WriteDataInitializers() {
-  if (module_->memories.empty())
-    return;
-
+  const Memory* memory = nullptr;
   Index data_segment_index = 0;
-  for (const DataSegment* data_segment : module_->data_segments) {
-    Write("static const u8 data_segment_data_", data_segment_index,
-          "[] = ", OpenBrace());
-    size_t i = 0;
-    for (uint8_t x : data_segment->data) {
-      Writef("0x%02x, ", x);
-      if ((++i % 12) == 0)
-        Write(Newline());
-    }
-    Write(CloseBrace(), ";", Newline(), Newline(true), Newline(true));
-    ++data_segment_index;
-  }
 
-  const Memory* memory = module_->memories[0];
+  if (!module_->memories.empty()) {
+    for (const DataSegment* data_segment : module_->data_segments) {
+      Write("static const u8 data_segment_data_", data_segment_index,
+            "[] = ", OpenBrace());
+      size_t i = 0;
+      for (uint8_t x : data_segment->data) {
+        Writef("0x%02x, ", x);
+        if ((++i % 12) == 0)
+          Write(Newline());
+      }
+      Write(CloseBrace(), ";", Newline(), Newline(true), Newline(true));
+      ++data_segment_index;
+    }
+
+    memory = module_->memories[0];
+  }
 
   Write("static void init_memory(void) ", OpenBrace());
   data_segment_index = 0;
@@ -1052,29 +1128,31 @@ void CWriter::WriteDataInitializers() {
 }
 
 void CWriter::WriteElemInitializers() {
-  if (module_->tables.empty())
-    return;
-
+  const Table* table = nullptr;
   Index elem_segment_index = 0;
-  for (const ElemSegment* elem_segment : module_->elem_segments) {
-    Write("static const Elem elem_segment_data_", elem_segment_index,
-          "[] = ", OpenBrace());
 
-    size_t i = 0;
-    for (const Var& var : elem_segment->vars) {
-      const Func* func = module_->GetFunc(var);
-      Index func_type_index = module_->GetFuncTypeIndex(func->decl.type_var);
+  if (!module_->tables.empty()) {
+    for (const ElemSegment* elem_segment : module_->elem_segments) {
+      Write("static const Elem elem_segment_data_", elem_segment_index,
+            "[] = ", OpenBrace());
 
-      Write("{", func_type_index, ", (Anyfunc)", GlobalName(func->name), "}, ");
+      size_t i = 0;
+      for (const Var& var : elem_segment->vars) {
+        const Func* func = module_->GetFunc(var);
+        Index func_type_index = module_->GetFuncTypeIndex(func->decl.type_var);
 
-      if ((++i % 4) == 0)
-        Write(Newline());
+        Write("{", func_type_index, ", (Anyfunc)", GlobalName(func->name),
+              "}, ");
+
+        if ((++i % 4) == 0)
+          Write(Newline());
+      }
+      Write(CloseBrace(), ";", Newline(), Newline(true), Newline(true));
+      ++elem_segment_index;
     }
-    Write(CloseBrace(), ";", Newline(), Newline(true), Newline(true));
-    ++elem_segment_index;
-  }
 
-  const Table* table = module_->tables[0];
+    table = module_->tables[0];
+  }
 
   Write("static void init_table(void) ", OpenBrace());
   elem_segment_index = 0;
@@ -1159,8 +1237,12 @@ void CWriter::Write(const Func& func) {
   stream_ = &func_stream_;
   stream_->ClearOffset();
 
+  std::string label = DefineLocalName(kImplicitFuncLabel);
   ResetTypeStack(0);
-  Write(func.exprs);
+  std::string empty;  // Must not be temporary, since address is taken by Label.
+  PushLabel(empty, func.decl.sig.result_types);
+  Write(func.exprs, LabelDecl(label));
+  PopLabel();
   ResetTypeStack(0);
   PushTypes(func.decl.sig.result_types);
 
@@ -1260,15 +1342,6 @@ void CWriter::WriteStackVarDeclarations() {
   }
 }
 
-void CWriter::Write(const Block& block) {
-  size_t mark = MarkTypeStack();
-  PushLabel(block);
-  Write(Newline(), block.exprs);
-  ResetTypeStack(mark);
-  PopLabel();
-  PushTypes(block.sig);
-}
-
 void CWriter::Write(const ExprList& exprs) {
   for (const Expr& expr: exprs) {
     switch (expr.type()) {
@@ -1279,16 +1352,21 @@ void CWriter::Write(const ExprList& exprs) {
       case ExprType::Block: {
         const Block& block = cast<BlockExpr>(&expr)->block;
         std::string label = DefineLocalName(block.label);
-        Write(block, label, ":;", Newline());
+        size_t mark = MarkTypeStack();
+        PushLabel(block.label, block.sig);
+        Write(block.exprs, LabelDecl(label));
+        ResetTypeStack(mark);
+        PopLabel();
+        PushTypes(block.sig);
         break;
       }
 
       case ExprType::Br: {
         const Var& var = cast<BrExpr>(&expr)->var;
         const Label* label = FindLabel(var);
-        if (!label->block.sig.empty())
+        if (!label->sig.empty())
           Write(CopyLabelVar(*label), " ");
-        Write("goto ", var, ";", Newline());
+        Write(GotoLabel(var), Newline());
         // Stop processing this ExprList, since the following are unreachable.
         return;
       }
@@ -1297,10 +1375,10 @@ void CWriter::Write(const ExprList& exprs) {
         const Var& var = cast<BrIfExpr>(&expr)->var;
         const Label* label = FindLabel(var);
         Write("if (", StackVar(0), ") ");
-        if (!label->block.sig.empty()) {
+        if (!label->sig.empty()) {
           Write("{", CopyLabelVar(*label), " goto ", var, ";}", Newline());
         } else {
-          Write("goto ", var, ";", Newline());
+          Write(GotoLabel(var), Newline());
         }
         DropTypes(1);
         break;
@@ -1315,17 +1393,17 @@ void CWriter::Write(const ExprList& exprs) {
         for (const Var& var : bt_expr->targets) {
           label = FindLabel(var);
           Write(Newline(), "case ", i, ": ");
-          if (!label->block.sig.empty())
+          if (!label->sig.empty())
             Write(CopyLabelVar(*label), "; ");
-          Write("goto ", var, ";");
+          Write(GotoLabel(var));
           ++i;
         }
 
         label = FindLabel(bt_expr->default_target);
         Write(Newline(), "default: ");
-        if (!label->block.sig.empty())
+        if (!label->sig.empty())
           Write(CopyLabelVar(*label), "; ");
-        Write("goto ", bt_expr->default_target, ";", CloseBrace(), Newline());
+        Write(GotoLabel(bt_expr->default_target), CloseBrace(), Newline());
         break;
       }
 
@@ -1425,16 +1503,17 @@ void CWriter::Write(const ExprList& exprs) {
         const IfExpr& if_ = *cast<IfExpr>(&expr);
         Write("if (", StackVar(0), ") ", OpenBrace());
         DropTypes(1);
+        std::string label = DefineLocalName(if_.true_.label);
         size_t mark = MarkTypeStack();
-        PushLabel(if_.true_);
+        PushLabel(if_.true_.label, if_.true_.sig);
         Write(if_.true_.exprs, CloseBrace());
         if (!if_.false_.empty()) {
           ResetTypeStack(mark);
           Write(" else ", OpenBrace(), if_.false_, CloseBrace());
         }
         ResetTypeStack(mark);
+        Write(LabelDecl(label));
         PopLabel();
-        Write(Newline());
         PushTypes(if_.true_.sig);
         break;
       }
@@ -1447,7 +1526,12 @@ void CWriter::Write(const ExprList& exprs) {
         const Block& block = cast<LoopExpr>(&expr)->block;
         Write(DefineLocalName(block.label), ": ");
         Indent();
-        Write(block);
+        size_t mark = MarkTypeStack();
+        PushLabel(block.label, block.sig);
+        Write(Newline(), block.exprs);
+        ResetTypeStack(mark);
+        PopLabel();
+        PushTypes(block.sig);
         Dedent();
         Write(Newline());
         break;
@@ -1654,28 +1738,37 @@ void CWriter::Write(const BinaryExpr& expr) {
       break;
 
     case Opcode::I32Rotl:
+      WritePrefixBinaryExpr(expr.opcode, "I32_ROTL");
+      break;
+
     case Opcode::I64Rotl:
-      UNIMPLEMENTED(expr.opcode.GetName());
+      WritePrefixBinaryExpr(expr.opcode, "I64_ROTL");
       break;
 
     case Opcode::I32Rotr:
+      WritePrefixBinaryExpr(expr.opcode, "I32_ROTR");
+      break;
+
     case Opcode::I64Rotr:
-      UNIMPLEMENTED(expr.opcode.GetName());
+      WritePrefixBinaryExpr(expr.opcode, "I64_ROTR");
       break;
 
     case Opcode::F32Min:
     case Opcode::F64Min:
-      UNIMPLEMENTED(expr.opcode.GetName());
+      WritePrefixBinaryExpr(expr.opcode, "FMIN");
       break;
 
     case Opcode::F32Max:
     case Opcode::F64Max:
-      UNIMPLEMENTED(expr.opcode.GetName());
+      WritePrefixBinaryExpr(expr.opcode, "FMAX");
       break;
 
     case Opcode::F32Copysign:
+      WritePrefixBinaryExpr(expr.opcode, "copysignf");
+      break;
+
     case Opcode::F64Copysign:
-      UNIMPLEMENTED(expr.opcode.GetName());
+      WritePrefixBinaryExpr(expr.opcode, "copysign");
       break;
 
     default:
