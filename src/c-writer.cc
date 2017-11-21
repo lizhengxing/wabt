@@ -44,11 +44,20 @@ enum class NextChar {
 };
 
 struct Label {
-  Label(const std::string& name,
+  Label(LabelType label_type,
+        const std::string& name,
         const BlockSignature& sig,
         size_t type_stack_size,
         bool used = false)
-      : name(name), sig(sig), type_stack_size(type_stack_size), used(used) {}
+      : label_type(label_type),
+        name(name),
+        sig(sig),
+        type_stack_size(type_stack_size),
+        used(used) {}
+
+  bool HasValue() const { return label_type != LabelType::Loop && !sig.empty(); }
+
+  LabelType label_type;
   const std::string& name;
   const BlockSignature& sig;
   size_t type_stack_size;
@@ -142,7 +151,8 @@ class CWriter {
   void PushTypes(const TypeVector&);
   void DropTypes(size_t count);
 
-  void PushLabel(const std::string& name,
+  void PushLabel(LabelType,
+                 const std::string& name,
                  const BlockSignature&,
                  bool used = false);
   const Label* FindLabel(const Var& var);
@@ -266,7 +276,8 @@ static const char* s_global_symbols[] = {
   "switch", "_Thread_local", "typedef", "union", "unsigned", "void", "volatile",
   "while",
 
-  // TODO(binji): assert.h
+  // assert.h
+  "assert", "static_assert",
 
   // math.h
   "abs", "acos", "acosh", "asin", "asinh", "atan", "atan2", "atanh", "cbrt",
@@ -320,41 +331,26 @@ static const char* s_global_symbols[] = {
   "strtok", "strxfrm",
 
   // defined
-  // TODO(binji): finish
-  "Anyfunc",
-  "CALL_INDIRECT",
-  "DEFINE_LOAD",
-  "DEFINE_STORE",
-  "Elem",
-  "EXPORT_FUNC",
-  "EXPORT_GLOBAL",
-  "EXPORT_MEMORY",
-  "EXPORT_TABLE",
-  "f32",
-  "F32",
-  "f64",
-  "F64",
-  "I32",
-  "I64",
-  "init",
-  "MEMCHECK",
-  "Memory",
-  "register_func_type",
-  "s16",
-  "s32",
-  "s64",
-  "s8",
-  "Table",
-  "trap",
-  "Trap",
-  "TRAP_OOB",
-  "Type",
-  "u16",
-  "u32",
-  "u64",
-  "u8",
-  "UNREACHABLE",
-
+  "Anyfunc", "CALL_INDIRECT", "DEFINE_LOAD", "DEFINE_REINTERPRET",
+  "DEFINE_STORE", "DIVREM_S", "DIVREM_U", "DIV_U", "Elem", "EXPORT_FUNC",
+  "EXPORT_GLOBAL", "EXPORT_MEMORY", "EXPORT_TABLE", "f32", "F32", "f32_load",
+  "f32_reinterpret_i32", "f32_store", "f64", "F64", "f64_load",
+  "f64_reinterpret_i64", "f64_store", "FMAX", "FMIN", "I32", "I32_CLZ",
+  "I32_CLZ", "I32_DIV_S", "i32_load", "i32_load16_s", "i32_load16_u",
+  "i32_load8_s", "i32_load8_u", "I32_POPCNT", "i32_reinterpret_f32",
+  "I32_REM_S", "I32_ROTL", "I32_ROTR", "i32_store", "i32_store16", "i32_store8",
+  "I32_TRUNC_S_F32", "I32_TRUNC_S_F64", "I32_TRUNC_U_F32", "I32_TRUNC_U_F64",
+  "I64", "I64_CTZ", "I64_CTZ", "I64_DIV_S", "i64_load", "i64_load16_s",
+  "i64_load16_u", "i64_load32_s", "i64_load32_u", "i64_load8_s", "i64_load8_u",
+  "I64_POPCNT", "i64_reinterpret_f64", "I64_REM_S", "I64_ROTL", "I64_ROTR",
+  "i64_store", "i64_store16", "i64_store32", "i64_store8", "I64_TRUNC_S_F32",
+  "I64_TRUNC_S_F64", "I64_TRUNC_U_F32", "I64_TRUNC_U_F64", "init",
+  "init_globals", "init_memory", "init_table", "LIKELY", "MEMCHECK", "Memory",
+  "register_func_type", "REM_U", "ROTL", "ROTR", "s16", "s32", "s64", "s8",
+  "Table", "trap", "Trap", "TRAP", "TRAP_CALL_INDIRECT", "TRAP_DIV_BY_ZERO",
+  "TRAP_INT_OVERFLOW", "TRAP_INVALID_CONVERSION", "TRAP_OOB",
+  "TRAP_UNREACHABLE", "TRUNC_S", "TRUNC_U", "Type", "u16", "u32", "u64", "u8",
+  "UNLIKELY", "UNREACHABLE",
 };
 
 static const char s_header[] =
@@ -528,10 +524,11 @@ void CWriter::DropTypes(size_t count) {
   type_stack_.erase(type_stack_.end() - count, type_stack_.end());
 }
 
-void CWriter::PushLabel(const std::string& name,
+void CWriter::PushLabel(LabelType label_type,
+                        const std::string& name,
                         const BlockSignature& sig,
                         bool used) {
-  label_stack_.emplace_back(name, sig, type_stack_.size(), used);
+  label_stack_.emplace_back(label_type, name, sig, type_stack_.size(), used);
 }
 
 const Label* CWriter::FindLabel(const Var& var) {
@@ -847,6 +844,7 @@ void CWriter::Write(const Const& const_) {
       break;
 
     case Type::F32: {
+      // TODO(binji): Don't use hexfloats to be C89 compatible?
       char buffer[128];
       WriteFloatHex(buffer, 128, const_.f32_bits);
       Writef("%s /*=%g*/", buffer, Bitcast<float>(const_.f32_bits));
@@ -854,6 +852,7 @@ void CWriter::Write(const Const& const_) {
     }
 
     case Type::F64: {
+      // TODO(binji): Don't use hexfloats to be C89 compatible?
       char buffer[128];
       WriteDoubleHex(buffer, 128, const_.f64_bits);
       Writef("%s /*=%g*/", buffer, Bitcast<double>(const_.f64_bits));
@@ -1240,7 +1239,7 @@ void CWriter::Write(const Func& func) {
   std::string label = DefineLocalName(kImplicitFuncLabel);
   ResetTypeStack(0);
   std::string empty;  // Must not be temporary, since address is taken by Label.
-  PushLabel(empty, func.decl.sig.result_types);
+  PushLabel(LabelType::Func, empty, func.decl.sig.result_types);
   Write(func.exprs, LabelDecl(label));
   PopLabel();
   ResetTypeStack(0);
@@ -1353,7 +1352,7 @@ void CWriter::Write(const ExprList& exprs) {
         const Block& block = cast<BlockExpr>(&expr)->block;
         std::string label = DefineLocalName(block.label);
         size_t mark = MarkTypeStack();
-        PushLabel(block.label, block.sig);
+        PushLabel(LabelType::Block, block.label, block.sig);
         Write(block.exprs, LabelDecl(label));
         ResetTypeStack(mark);
         PopLabel();
@@ -1364,7 +1363,7 @@ void CWriter::Write(const ExprList& exprs) {
       case ExprType::Br: {
         const Var& var = cast<BrExpr>(&expr)->var;
         const Label* label = FindLabel(var);
-        if (!label->sig.empty())
+        if (label->HasValue())
           Write(CopyLabelVar(*label), " ");
         Write(GotoLabel(var), Newline());
         // Stop processing this ExprList, since the following are unreachable.
@@ -1375,7 +1374,7 @@ void CWriter::Write(const ExprList& exprs) {
         const Var& var = cast<BrIfExpr>(&expr)->var;
         const Label* label = FindLabel(var);
         Write("if (", StackVar(0), ") ");
-        if (!label->sig.empty()) {
+        if (label->HasValue()) {
           Write("{", CopyLabelVar(*label), " goto ", var, ";}", Newline());
         } else {
           Write(GotoLabel(var), Newline());
@@ -1393,7 +1392,7 @@ void CWriter::Write(const ExprList& exprs) {
         for (const Var& var : bt_expr->targets) {
           label = FindLabel(var);
           Write(Newline(), "case ", i, ": ");
-          if (!label->sig.empty())
+          if (label->HasValue())
             Write(CopyLabelVar(*label), "; ");
           Write(GotoLabel(var));
           ++i;
@@ -1401,7 +1400,7 @@ void CWriter::Write(const ExprList& exprs) {
 
         label = FindLabel(bt_expr->default_target);
         Write(Newline(), "default: ");
-        if (!label->sig.empty())
+        if (label->HasValue())
           Write(CopyLabelVar(*label), "; ");
         Write(GotoLabel(bt_expr->default_target), CloseBrace(), Newline());
         break;
@@ -1505,7 +1504,7 @@ void CWriter::Write(const ExprList& exprs) {
         DropTypes(1);
         std::string label = DefineLocalName(if_.true_.label);
         size_t mark = MarkTypeStack();
-        PushLabel(if_.true_.label, if_.true_.sig);
+        PushLabel(LabelType::If, if_.true_.label, if_.true_.sig);
         Write(if_.true_.exprs, CloseBrace());
         if (!if_.false_.empty()) {
           ResetTypeStack(mark);
@@ -1527,7 +1526,7 @@ void CWriter::Write(const ExprList& exprs) {
         Write(DefineLocalName(block.label), ": ");
         Indent();
         size_t mark = MarkTypeStack();
-        PushLabel(block.label, block.sig);
+        PushLabel(LabelType::Loop, block.label, block.sig);
         Write(Newline(), block.exprs);
         ResetTypeStack(mark);
         PopLabel();

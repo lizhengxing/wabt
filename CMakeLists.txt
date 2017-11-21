@@ -236,7 +236,6 @@ add_library(libwabt STATIC
   src/binary-reader-ir.cc
   src/binding-hash.cc
   src/wat-writer.cc
-  src/c-writer.cc
   src/interp.cc
   src/binary-reader-interp.cc
   src/apply-names.cc
@@ -293,7 +292,8 @@ if (NOT EMSCRIPTEN)
   wabt_executable(wasm2wat src/tools/wasm2wat.cc)
 
   # wasm2c
-  wabt_executable(wasm2c src/tools/wasm2c.cc)
+  wabt_executable(wasm2c
+    src/tools/wasm2c.cc src/c-writer.cc)
 
   # wasm-opcodecnt
   wabt_executable(wasm-opcodecnt
