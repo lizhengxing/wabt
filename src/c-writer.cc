@@ -55,7 +55,9 @@ struct Label {
         type_stack_size(type_stack_size),
         used(used) {}
 
-  bool HasValue() const { return label_type != LabelType::Loop && !sig.empty(); }
+  bool HasValue() const {
+    return label_type != LabelType::Loop && !sig.empty();
+  }
 
   LabelType label_type;
   const std::string& name;
@@ -1230,6 +1232,7 @@ void CWriter::Write(const Func& func) {
 
   Write("static ", ResultType(func.decl.sig.result_types), " ",
         GlobalName(func.name), "(");
+  // TODO(binji): Add stack check?
   WriteParams();
   WriteLocals();
 
